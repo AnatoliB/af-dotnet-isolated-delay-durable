@@ -9,28 +9,31 @@ namespace Company.Function;
 public static class MyOrchestration
 {
     [Function(nameof(MyOrchestration))]
-    public static async Task<List<string>> RunOrchestrator(
+    public static async Task<string> RunOrchestrator(
         [OrchestrationTrigger] TaskOrchestrationContext context)
     {
         ILogger logger = context.CreateReplaySafeLogger(nameof(MyOrchestration));
-        logger.LogInformation("Saying hello.");
-        var outputs = new List<string>();
+        
+        // Get the delay duration from the orchestration input
+        int delaySeconds = context.GetInput<int>();
+        logger.LogInformation("Starting delay orchestration for {delaySeconds} seconds.", delaySeconds);
 
-        // Replace name and input with values relevant for your Durable Functions Activity
-        outputs.Add(await context.CallActivityAsync<string>(nameof(SayHello), "Tokyo"));
-        outputs.Add(await context.CallActivityAsync<string>(nameof(SayHello), "Seattle"));
-        outputs.Add(await context.CallActivityAsync<string>(nameof(SayHello), "London"));
+        // Call the Delay activity once
+        string result = await context.CallActivityAsync<string>(nameof(Delay), delaySeconds);
 
-        // returns ["Hello Tokyo!", "Hello Seattle!", "Hello London!"]
-        return outputs;
+        return result;
     }
 
-    [Function(nameof(SayHello))]
-    public static string SayHello([ActivityTrigger] string name, FunctionContext executionContext)
+    [Function(nameof(Delay))]
+    public static async Task<string> Delay([ActivityTrigger] int delaySeconds, FunctionContext executionContext)
     {
-        ILogger logger = executionContext.GetLogger("SayHello");
-        logger.LogInformation("Saying hello to {name}.", name);
-        return $"Hello {name}!";
+        ILogger logger = executionContext.GetLogger("Delay");
+        logger.LogInformation("Starting delay for {delaySeconds} seconds.", delaySeconds);
+        
+        await Task.Delay(TimeSpan.FromSeconds(delaySeconds));
+        
+        logger.LogInformation("Delay of {delaySeconds} seconds completed.", delaySeconds);
+        return $"Delay of {delaySeconds} seconds completed successfully.";
     }
 
     [Function("MyOrchestration_HttpStart")]
@@ -41,9 +44,20 @@ public static class MyOrchestration
     {
         ILogger logger = executionContext.GetLogger("MyOrchestration_HttpStart");
 
-        // Function input comes from the request content.
+        // Get delay duration from query parameter
+        string delayParam = req.Query["delay"] ?? "5"; // Default to 5 seconds if not provided
+        
+        if (!int.TryParse(delayParam, out int delaySeconds) || delaySeconds <= 0)
+        {
+            logger.LogWarning("Invalid delay parameter: {delayParam}. Using default value of 5 seconds.", delayParam);
+            delaySeconds = 5;
+        }
+
+        logger.LogInformation("Starting orchestration with delay of {delaySeconds} seconds.", delaySeconds);
+
+        // Start orchestration with delay duration as input
         string instanceId = await client.ScheduleNewOrchestrationInstanceAsync(
-            nameof(MyOrchestration));
+            nameof(MyOrchestration), delaySeconds);
 
         logger.LogInformation("Started orchestration with ID = '{instanceId}'.", instanceId);
 
